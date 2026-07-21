@@ -1,9 +1,21 @@
 #include <iostream>
 #include <vector>
+#include <csignal>
+#include <atomic>
 #include <portaudio.h>
 #include <speex/speex_echo.h>
 #include <speex/speex_preprocess.h>
 
+// Use std::atomic to prevent data races across standard execution and the handler
+std::atomic<bool> shutdown_requested(false);
+
+// The signal handler function signature must match: void(int)
+void handle_sigint(int signal_num) {
+    if (signal_num == SIGINT) {
+        // Only perform lock-free atomic assignments or async-signal-safe actions here
+        shutdown_requested.store(true); 
+    }
+}
 
 // Audio parameters
 const int SAMPLE_RATE = 16000;
@@ -11,6 +23,8 @@ const int FRAME_SIZE = 160;       // 10ms at 16kHz
 const int FILTER_LENGTH = FRAME_SIZE * 10; // 100ms echo tail
 
 int main() {
+    // Register the custom handler for SIGINT
+    std::signal(SIGINT, handle_sigint);
     std::cout << "Initializing PortAudio..." << std::endl;
     PaError err = Pa_Initialize();
     if (err != paNoError) {
@@ -140,7 +154,7 @@ int main() {
 
     std::cout << "Starting real-time echo cancellation. Press Ctrl+C to stop.\n";
 
-    while (true) {
+    while (!shutdown_requested.load()) {
         // Read from system (reference)
         Pa_ReadStream(refStream, refBuf.data(), FRAME_SIZE);
         // Read from mic (contains echo)
